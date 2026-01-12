@@ -1,0 +1,130 @@
+name: Publish to crates.io
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '要发布的版本号 (例如: 1.0.1)'
+        required: true
+        type: string
+      dry_run:
+        description: '仅验证，不实际发布'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 验证和发布到 crates.io
+  publish:
+    name: 发布到 crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 验证版本号
+        id: version
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          # 检查版本号格式 (x.y.z)
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "错误: 版本号格式不正确，应为 x.y.z (例如: 1.0.1)"
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "版本号: $VERSION"
+
+      - name: 检查 Cargo.toml 中的版本号
+        run: |
+          CARGO_VERSION=$(grep -E '^version\s*=' Cargo.toml | head -1 | sed -E 's/^version\s*=\s*"([^"]+)".*/\1/')
+          EXPECTED_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$CARGO_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "错误: Cargo.toml 中的版本号 ($CARGO_VERSION) 与输入的版本号 ($EXPECTED_VERSION) 不匹配"
+            exit 1
+          fi
+          echo "✓ 版本号匹配: $CARGO_VERSION"
+
+      - name: 检查 publish 设置
+        run: |
+          if grep -q '^publish\s*=\s*false' Cargo.toml; then
+            echo "警告: Cargo.toml 中 publish = false，需要修改为 true 或删除此行才能发布"
+            echo "提示: 发布前请确保已准备好所有必要的元数据"
+          fi
+
+      - name: 缓存 Cargo 依赖
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev libclang-dev
+
+      - name: 运行 Clippy 检查
+        env:
+          BLAS_INCLUDE_DIRS: /usr/include/openblas
+        run: cargo clippy --all-targets -- -D warnings
+        continue-on-error: false
+
+      - name: 运行测试
+        env:
+          BLAS_INCLUDE_DIRS: /usr/include/openblas
+        run: cargo test --lib --verbose
+        continue-on-error: false
+
+      - name: 检查代码格式
+        run: cargo fmt --all -- --check
+        continue-on-error: false
+
+      - name: 验证包配置
+        env:
+          BLAS_INCLUDE_DIRS: /usr/include/openblas
+        run: cargo check --verbose
+        continue-on-error: false
+
+      - name: 构建包
+        run: cargo build --release --verbose
+        continue-on-error: false
+
+      - name: 准备发布 (Dry Run)
+        if: github.event.inputs.dry_run == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          echo "执行 dry-run 验证..."
+          cargo publish --dry-run --verbose
+          echo "✓ Dry-run 验证通过"
+
+      - name: 发布到 crates.io
+        if: github.event.inputs.dry_run != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          echo "开始发布到 crates.io..."
+          cargo publish --verbose
+          echo "✓ 成功发布到 crates.io"
+
+      - name: 发布结果
+        if: always()
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "::notice::Dry-run 验证完成，未实际发布"
+          else
+            echo "::notice::已成功发布版本 ${{ steps.version.outputs.version }} 到 crates.io"
+            echo "查看: https://crates.io/crates/voice"
+          fi

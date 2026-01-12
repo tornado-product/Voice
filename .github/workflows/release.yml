@@ -1,0 +1,352 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # 匹配版本标签，如 v1.0.0
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (例如: 1.0.0)'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 创建发布版本
+  create-release:
+    name: 创建发布
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 提取版本号
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=${GITHUB_REF#refs/tags/v}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "版本号: $VERSION"
+
+  # 构建发布版本 - Linux
+  build-linux:
+    name: 构建 Linux 发布版
+    needs: create-release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Cargo 依赖
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: 构建 Release 版本
+        run: cargo build --release --verbose
+
+      - name: 创建发布包
+        run: |
+          mkdir -p release
+          cp target/release/voice release/ || true
+          cp target/release/voice.exe release/ || true
+          cp README.md release/
+          cp CHANGELOG.md release/
+          tar czf voice-${{ needs.create-release.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz -C release .
+
+      - name: 上传发布包
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: voice-*.tar.gz
+          retention-days: 30
+
+  # 构建发布版本 - Windows
+  build-windows:
+    name: 构建 Windows 发布版
+    needs: create-release
+    runs-on: windows-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Cargo 依赖
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: 构建 Release 版本
+        run: cargo build --release --verbose
+
+      - name: 创建发布包
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release
+          Copy-Item target\release\voice.exe release\ -ErrorAction SilentlyContinue
+          Copy-Item README.md release\
+          Copy-Item CHANGELOG.md release\
+          Compress-Archive -Path release\* -DestinationPath voice-${{ needs.create-release.outputs.version }}-x86_64-pc-windows-msvc.zip
+
+      - name: 上传发布包
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: voice-*.zip
+          retention-days: 30
+
+  # 构建发布版本 - macOS
+  build-macos:
+    name: 构建 macOS 发布版
+    needs: create-release
+    runs-on: macos-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Cargo 依赖
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: 构建 Release 版本
+        run: cargo build --release --verbose
+
+      - name: 创建发布包
+        run: |
+          mkdir -p release
+          cp target/release/voice release/ || true
+          cp README.md release/
+          cp CHANGELOG.md release/
+          tar czf voice-${{ needs.create-release.outputs.version }}-x86_64-apple-darwin.tar.gz -C release .
+
+      - name: 上传发布包
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          path: voice-*.tar.gz
+          retention-days: 30
+
+  # 发布到 crates.io
+  publish-crates-io:
+    name: 发布到 crates.io
+    needs: create-release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev libclang-dev
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 提取版本号
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "版本号: $VERSION"
+
+      - name: 检查 Cargo.toml 中的版本号
+        run: |
+          CARGO_VERSION=$(grep -E '^version\s*=' Cargo.toml | head -1 | sed -E 's/^version\s*=\s*"([^"]+)".*/\1/')
+          EXPECTED_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$CARGO_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "错误: Cargo.toml 中的版本号 ($CARGO_VERSION) 与标签版本号 ($EXPECTED_VERSION) 不匹配"
+            exit 1
+          fi
+          echo "✓ 版本号匹配: $CARGO_VERSION"
+
+      - name: 检查 publish 设置
+        id: check-publish
+        run: |
+          if grep -q '^publish\s*=\s*false' Cargo.toml; then
+            echo "publish_enabled=false" >> $GITHUB_OUTPUT
+            echo "警告: Cargo.toml 中 publish = false，跳过发布到 crates.io"
+            echo "如需发布，请将 publish = false 改为 publish = true 或删除此行"
+          else
+            echo "publish_enabled=true" >> $GITHUB_OUTPUT
+            echo "✓ 允许发布到 crates.io"
+          fi
+
+      - name: 检查 Token
+        id: check-token
+        if: steps.check-publish.outputs.publish_enabled == 'true'
+        run: |
+          if [ -z "${{ secrets.CRATES_IO_TOKEN }}" ]; then
+            echo "token_available=false" >> $GITHUB_OUTPUT
+            echo "警告: 未配置 CRATES_IO_TOKEN，跳过发布到 crates.io"
+          else
+            echo "token_available=true" >> $GITHUB_OUTPUT
+            echo "✓ CRATES_IO_TOKEN 已配置"
+          fi
+
+      - name: 缓存 Cargo 依赖
+        if: steps.check-publish.outputs.publish_enabled == 'true' && steps.check-token.outputs.token_available == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: 运行 Clippy 检查
+        if: steps.check-publish.outputs.publish_enabled == 'true' && steps.check-token.outputs.token_available == 'true'
+        env:
+          BLAS_INCLUDE_DIRS: /usr/include/openblas
+        run: cargo clippy --all-targets -- -D warnings
+        continue-on-error: false
+
+      - name: 运行测试
+        if: steps.check-publish.outputs.publish_enabled == 'true' && steps.check-token.outputs.token_available == 'true'
+        env:
+          BLAS_INCLUDE_DIRS: /usr/include/openblas
+        run: cargo test --lib --verbose
+        continue-on-error: false
+
+      - name: 验证包配置
+        if: steps.check-publish.outputs.publish_enabled == 'true' && steps.check-token.outputs.token_available == 'true'
+        env:
+          BLAS_INCLUDE_DIRS: /usr/include/openblas
+        run: cargo check --verbose
+        continue-on-error: false
+
+      - name: 构建包
+        if: steps.check-publish.outputs.publish_enabled == 'true' && steps.check-token.outputs.token_available == 'true'
+        env:
+          BLAS_INCLUDE_DIRS: /usr/include/openblas
+        run: cargo build --release --verbose
+        continue-on-error: false
+
+      - name: 发布到 crates.io
+        if: steps.check-publish.outputs.publish_enabled == 'true' && steps.check-token.outputs.token_available == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          echo "开始发布版本 ${{ steps.version.outputs.version }} 到 crates.io..."
+          cargo publish --verbose
+          echo "✓ 成功发布到 crates.io"
+          echo "查看: https://crates.io/crates/voice"
+
+      - name: 跳过发布（publish = false）
+        if: steps.check-publish.outputs.publish_enabled == 'false'
+        run: |
+          echo "::notice::跳过发布到 crates.io (Cargo.toml 中 publish = false)"
+
+      - name: 跳过发布（未配置 Token）
+        if: steps.check-publish.outputs.publish_enabled == 'true' && steps.check-token.outputs.token_available == 'false'
+        run: |
+          echo "::notice::跳过发布到 crates.io (未配置 CRATES_IO_TOKEN)"
+
+  # 上传到 GitHub Release
+  upload-release:
+    name: 上传到 GitHub Release
+    needs: [create-release, build-linux, build-windows, build-macos, publish-crates-io]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: 下载所有发布包
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 提取版本号
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "版本号: $VERSION"
+
+      - name: 检查 crates.io 发布状态
+        id: crates-status
+        run: |
+          if [ "${{ needs.publish-crates-io.result }}" = "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "message=✓ 已发布到 crates.io" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.publish-crates-io.result }}" = "skipped" ]; then
+            echo "status=skipped" >> $GITHUB_OUTPUT
+            echo "message=⊘ 跳过 crates.io 发布 (publish = false)" >> $GITHUB_OUTPUT
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "message=✗ crates.io 发布失败" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 创建并上传到 GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ steps.version.outputs.version }}
+          body: |
+            ## 版本 ${{ steps.version.outputs.version }}
+
+            请查看 [CHANGELOG.md](CHANGELOG.md) 了解详细变更。
+
+            ### 下载
+
+            - Linux: `voice-${{ steps.version.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz`
+            - Windows: `voice-${{ steps.version.outputs.version }}-x86_64-pc-windows-msvc.zip`
+            - macOS: `voice-${{ steps.version.outputs.version }}-x86_64-apple-darwin.tar.gz`
+
+            ### 发布状态
+
+            - crates.io: ${{ steps.crates-status.outputs.message }}
+            - 查看包: https://crates.io/crates/voice
+          files: artifacts/**/*
+          draft: false
+          prerelease: false

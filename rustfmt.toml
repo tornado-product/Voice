@@ -1,0 +1,23 @@
+# Rustfmt 配置文件
+# 用于统一代码格式化规则（仅使用 stable 版本支持的选项）
+
+# 使用稳定的格式化选项
+edition = "2021"
+
+# 代码风格选项
+max_width = 100                    # 最大行宽
+tab_spaces = 4                      # Tab 空格数
+newline_style = "Unix"              # 换行符风格 (Unix/Linux)
+use_small_heuristics = "Default"    # 使用小的启发式规则
+
+# 函数参数布局（使用新的选项名）
+fn_params_layout = "Tall"            # 函数参数布局
+
+# 其他选项
+remove_nested_parens = true         # 移除嵌套括号
+use_field_init_shorthand = true     # 使用字段初始化简写
+use_try_shorthand = true            # 使用 ? 操作符简写
+
+# 链式调用格式化
+chain_width = 80                    # 链式调用宽度
+single_line_if_else_max_width = 50  # 单行 if-else 最大宽度

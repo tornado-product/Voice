@@ -1,0 +1,58 @@
+[package]
+name = "voice"
+edition = "2021"
+version = "1.0.2"
+publish = true
+
+[lib]
+name = "voice"
+path = "src/lib.rs"
+
+[dependencies]
+whisper-rs = { git = "https://gitee.com/tone1234/whisper-rs.git", default-features = false, features = ["tracing_backend"]}
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.11", features = ["multipart", "json", "rustls-tls"], default-features = false }
+sherpa-rs = { version = "0.6.8", features = ["tts", "download-binaries"] }
+symphonia = { version = "0.5", features = ["all"] }
+tokio = { version = "1.0", features = ["process", "io-util", "rt-multi-thread", "rt", "macros"] }
+thiserror = "2.0.12"
+log = "0.4"
+#env_logger = "0.11"
+tokio-tungstenite = { version = "0.23.1", features = ["native-tls"] }
+futures-util = "0.3.31"
+base64 = "0.22.1"
+uuid = { version = "1.18", features = ["v1", "v4"] }
+anyhow = "1.0.100"
+hound = "3.5"
+minimp3 = "0.5"
+parking_lot = "0.12"
+rust-i18n = "3"
+strum = "0.26"
+strum_macros = "0.26"
+
+# Windows dependencies
+[target.'cfg(target_os = "windows")'.dependencies]
+raw-window-handle = "0.6"
+ash = "0.38"  # Vulkan bindings for runtime GPU detection
+
+# Linux dependencies
+[target.'cfg(target_os = "linux")'.dependencies]
+ash = "0.38"  # Vulkan bindings for runtime GPU detection
+
+# macOS/iOS dependencies
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSURL", "NSArray"] }
+objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication", "NSWindow", "NSResponder", "NSView"] }
+objc2-av-foundation = { version = "0.3", features = ["AVCaptureDevice", "AVMediaFormat"] }
+block2 = "0.6"
+core-foundation = "0.10"
+
+[features]
+coreml = ["whisper-rs/coreml"]
+cuda = ["whisper-rs/cuda"]
+openblas = ["whisper-rs/openblas"]
+metal = ["whisper-rs/metal"]
+rocm = ["whisper-rs/hipblas"]
+vulkan = ["whisper-rs/vulkan"]
